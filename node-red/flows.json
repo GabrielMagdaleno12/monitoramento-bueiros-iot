@@ -1,0 +1,478 @@
+[
+  {
+    "id": "tab_bueiros",
+    "type": "tab",
+    "label": "Monitoramento de Bueiros",
+    "disabled": false,
+    "info": "ESP32 -> MQTT -> regras de negocio -> InfluxDB. Variaveis de ambiente do fluxo (duplo clique na aba > Variaveis de ambiente): BUEIRO_ALTURA_CM (padrao 50 cm), BUEIRO_LOCAL, BUEIRO_LAT e BUEIRO_LON. A chave da API do OpenWeatherMap vem da variavel de ambiente do sistema OPENWEATHER_KEY (veja o README, passo 7); sem ela o fluxo usa previsao simulada.",
+    "env": [
+      {
+        "name": "BUEIRO_ALTURA_CM",
+        "value": "50",
+        "type": "str"
+      },
+      {
+        "name": "BUEIRO_LOCAL",
+        "value": "Mackenzie-SP",
+        "type": "str"
+      },
+      {
+        "name": "BUEIRO_LAT",
+        "value": "-23.5475",
+        "type": "str"
+      },
+      {
+        "name": "BUEIRO_LON",
+        "value": "-46.6525",
+        "type": "str"
+      }
+    ]
+  },
+  {
+    "id": "mqtt_cfg",
+    "type": "mqtt-broker",
+    "name": "Broker MQTT local",
+    "broker": "127.0.0.1",
+    "port": "1883",
+    "clientid": "nodered-bueiros-mackenzie",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "influx_cfg",
+    "type": "influxdb",
+    "hostname": "127.0.0.1",
+    "port": "8086",
+    "protocol": "http",
+    "database": "database",
+    "name": "InfluxDB local",
+    "usetls": false,
+    "tls": "",
+    "influxdbVersion": "2.0",
+    "url": "http://127.0.0.1:8086",
+    "timeout": "10",
+    "rejectUnauthorized": true
+  },
+  {
+    "id": "mqtt_nivel",
+    "type": "mqtt in",
+    "z": "tab_bueiros",
+    "name": "bueiros/+/nivel",
+    "topic": "bueiros/+/nivel",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "mqtt_cfg",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 120,
+    "wires": [
+      [
+        "fn_calc"
+      ]
+    ]
+  },
+  {
+    "id": "fn_calc",
+    "type": "function",
+    "z": "tab_bueiros",
+    "name": "Validar e calcular nivel",
+    "func": "\nlet d;\ntry { d = (typeof msg.payload === 'string') ? JSON.parse(msg.payload) : msg.payload; }\ncatch (e) { node.warn('JSON invalido: ' + msg.payload); return null; }\nconst ALT = Number(env.get('BUEIRO_ALTURA_CM') || 100);          // altura do bueiro em cm\nconst dist = Number(d.distancia_cm);\nconst id = d.id || String(msg.topic).split('/')[1];\nif (!isFinite(dist) || dist < 2 || dist > 400) {\n  node.warn('Leitura fora da faixa do sensor (2 a 400 cm) descartada: ' + dist);\n  node.status({fill:'red', shape:'ring', text:'descartada: ' + dist});\n  return null;\n}\nconst nivel = Math.max(0, ALT - dist);                           // nivel (cm) = altura - distancia; acima da altura = bueiro vazio (0)\nconst pct = nivel / ALT * 100;                                    // nivel (%) = nivel / altura * 100\nmsg.leitura = {\n  id: id,\n  dist: Math.round(dist * 10) / 10,\n  nivel_cm: Math.round(nivel * 10) / 10,\n  nivel_pct: Math.round(pct * 10) / 10,\n  recebido: Date.now()\n};\n// latencia entre a leitura (ts do ESP32) e o recebimento no Node-RED (meta do artigo: menos de 2 s)\nconst tsDev = Date.parse(d.ts);\nlet lat = null;\nif (isFinite(tsDev) && tsDev > Date.parse('2020-01-01')) {\n  lat = msg.leitura.recebido - tsDev;\n  msg.leitura.latencia_ms = lat;\n  if (lat > 2000) node.warn('Latencia acima da meta de 2 s: ' + lat + ' ms');\n}\nnode.status({fill:'green', shape:'dot', text: id + ': ' + msg.leitura.nivel_pct + '%' + (lat !== null ? ' (lat ' + lat + ' ms)' : '')});\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 120,
+    "wires": [
+      [
+        "fn_classifica"
+      ]
+    ]
+  },
+  {
+    "id": "fn_classifica",
+    "type": "function",
+    "z": "tab_bueiros",
+    "name": "Regras de negocio (risco)",
+    "func": "const LOCAL = env.get('BUEIRO_LOCAL') || 'Mackenzie-SP';\n\nconst L = msg.leitura;\nconst LIM_ATENCAO = 40, LIM_CRITICO = 80;        // % da altura\nconst LIM_SUBIDA = 15;                            // pontos percentuais em 5 min (valor inicial, ajustavel)\nconst nomes = ['normal', 'atencao', 'critico'];\n\n// 1) classificacao pelo nivel\nconst base = L.nivel_pct >= LIM_CRITICO ? 2 : (L.nivel_pct >= LIM_ATENCAO ? 1 : 0);\n\n// 2) ajuste pela previsao de chuva (ignorada se desatualizada ha mais de 1 hora)\nconst ch = flow.get('chuva');\nlet chuva = false;\nif (ch && (Date.now() - ch.ts) <= 3600000) {\n  chuva = (ch.prob >= 70 || ch.mm >= 2.5);\n}\n\n// 3) elevacao rapida do nivel em 5 minutos\nconst chave = 'hist_' + L.id;\nconst hist = flow.get(chave) || [];\nhist.push({t: L.recebido, p: L.nivel_pct});\nconst rec = hist.filter(h => h.t >= L.recebido - 5 * 60 * 1000);\nflow.set(chave, rec);\nlet subida = false;\nif (rec.length > 1) {\n  const minimo = Math.min.apply(null, rec.map(h => h.p));\n  subida = (L.nivel_pct - minimo) >= LIM_SUBIDA;\n}\n\nconst est = Math.min(2, base + (chuva ? 1 : 0) + (subida ? 1 : 0));\nconst cor = est === 2 ? 'red' : (est === 1 ? 'yellow' : 'green');\nnode.status({fill: cor, shape: 'dot', text: L.id + ': ' + nomes[est] + ' (' + L.nivel_pct + '%' + (chuva ? ', chuva' : '') + (subida ? ', subida' : '') + ')'});\n\n// measurement nivel_bueiro | tags: bueiro_id, local | fields: distancia_cm, nivel_cm, nivel_pct, estado (artigo, secao 3.6)\nconst pontos = {\n  payload: [\n    { distancia_cm: L.dist, nivel_cm: L.nivel_cm, nivel_pct: L.nivel_pct, estado: nomes[est] },\n    { bueiro_id: L.id, local: LOCAL }\n  ]\n};\nconst risco = { topic: 'bueiros/' + L.id + '/risco', payload: nomes[est], retain: true, qos: 1 };\nreturn [pontos, risco];\n",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 120,
+    "wires": [
+      [
+        "influx_nivel",
+        "dbg_pontos"
+      ],
+      [
+        "mqtt_risco",
+        "dbg_risco"
+      ]
+    ]
+  },
+  {
+    "id": "influx_nivel",
+    "type": "influxdb out",
+    "z": "tab_bueiros",
+    "influxdb": "influx_cfg",
+    "name": "InfluxDB nivel_bueiro",
+    "measurement": "nivel_bueiro",
+    "precision": "",
+    "retentionPolicy": "",
+    "database": "database",
+    "precisionV18FluxV20": "ms",
+    "retentionPolicyV18Flux": "",
+    "org": "bueiros",
+    "bucket": "bueiros",
+    "x": 930,
+    "y": 90,
+    "wires": []
+  },
+  {
+    "id": "mqtt_risco",
+    "type": "mqtt out",
+    "z": "tab_bueiros",
+    "name": "bueiros/{id}/risco",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_cfg",
+    "x": 930,
+    "y": 150,
+    "wires": []
+  },
+  {
+    "id": "dbg_pontos",
+    "type": "debug",
+    "z": "tab_bueiros",
+    "name": "Ponto gravado",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1160,
+    "y": 90,
+    "wires": []
+  },
+  {
+    "id": "dbg_risco",
+    "type": "debug",
+    "z": "tab_bueiros",
+    "name": "Risco publicado",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 1160,
+    "y": 150,
+    "wires": []
+  },
+  {
+    "id": "mqtt_status",
+    "type": "mqtt in",
+    "z": "tab_bueiros",
+    "name": "bueiros/+/status",
+    "topic": "bueiros/+/status",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "mqtt_cfg",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 240,
+    "wires": [
+      [
+        "fn_status"
+      ]
+    ]
+  },
+  {
+    "id": "fn_status",
+    "type": "function",
+    "z": "tab_bueiros",
+    "name": "Registrar online/offline",
+    "func": "\nconst id = String(msg.topic).split('/')[1];\nconst txt = String(msg.payload);\nconst online = txt === 'online';\nif (!online) node.warn('Dispositivo ' + id + ' OFFLINE (evento registrado)');\nnode.status({fill: online ? 'green' : 'red', shape: 'dot', text: id + ': ' + txt});\n// o artigo (3.8) manda apenas registrar o evento; o registro fica no log e no painel de debug do Node-RED\nreturn { payload: { bueiro_id: id, status: txt, evento: online ? 'dispositivo online' : 'dispositivo OFFLINE', hora: new Date().toISOString() } };\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 240,
+    "wires": [
+      [
+        "dbg_status"
+      ]
+    ]
+  },
+  {
+    "id": "dbg_status",
+    "type": "debug",
+    "z": "tab_bueiros",
+    "name": "Evento do dispositivo",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload.evento",
+    "targetType": "msg",
+    "statusVal": "payload.evento",
+    "statusType": "auto",
+    "x": 680,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "inj_chuva",
+    "type": "inject",
+    "z": "tab_bueiros",
+    "name": "A cada 10 min",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "600",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "4",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 360,
+    "wires": [
+      [
+        "fn_prep"
+      ]
+    ]
+  },
+  {
+    "id": "fn_prep",
+    "type": "function",
+    "z": "tab_bueiros",
+    "name": "Preparar consulta",
+    "func": "\nconst key = env.get('OPENWEATHER_KEY');\nconst lat = env.get('BUEIRO_LAT') || '-23.5475';\nconst lon = env.get('BUEIRO_LON') || '-46.6525';\nif (key) {\n  msg.url = 'https://api.openweathermap.org/data/2.5/forecast?lat=' + lat + '&lon=' + lon + '&units=metric&cnt=2&appid=' + key;\n  msg.simulado = false;\n  return [msg, null];\n}\nmsg.simulado = true;           // sem chave da API: usa previsao simulada (alterada pelos botoes de teste)\nreturn [null, msg];\n",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 370,
+    "y": 360,
+    "wires": [
+      [
+        "http_ow"
+      ],
+      [
+        "fn_parse"
+      ]
+    ]
+  },
+  {
+    "id": "http_ow",
+    "type": "http request",
+    "z": "tab_bueiros",
+    "name": "GET OpenWeatherMap",
+    "method": "GET",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 600,
+    "y": 330,
+    "wires": [
+      [
+        "fn_parse"
+      ]
+    ]
+  },
+  {
+    "id": "catch_ow",
+    "type": "catch",
+    "z": "tab_bueiros",
+    "name": "Erro na API",
+    "scope": [
+      "http_ow"
+    ],
+    "uncaught": false,
+    "x": 600,
+    "y": 390,
+    "wires": [
+      [
+        "fn_parse"
+      ]
+    ]
+  },
+  {
+    "id": "fn_parse",
+    "type": "function",
+    "z": "tab_bueiros",
+    "name": "Extrair pop e chuva",
+    "func": "const LOCAL = env.get('BUEIRO_LOCAL') || 'Mackenzie-SP';\n\nlet prob, mm, origem;\nif (msg.simulado) {\n  const s = flow.get('chuva_sim') || { prob: 20, mm: 0 };\n  prob = s.prob; mm = s.mm; origem = 'simulada';\n} else if (msg.statusCode === 200 && msg.payload && msg.payload.list && msg.payload.list.length) {\n  const agora = Date.now();\n  let it = msg.payload.list[0];                         // intervalo de 3 h mais proximo do horario atual\n  msg.payload.list.forEach(x => { if (Math.abs(x.dt * 1000 - agora) < Math.abs(it.dt * 1000 - agora)) it = x; });\n  prob = Math.round((it.pop || 0) * 100);\n  mm = (it.rain && it.rain['3h']) ? it.rain['3h'] : 0;\n  origem = 'OpenWeatherMap';\n} else {\n  node.warn('Falha na consulta ao OpenWeatherMap (' + (msg.statusCode || 'sem resposta') + '): mantendo o ultimo valor valido');\n  return null;\n}\nflow.set('chuva', { prob: prob, mm: mm, ts: Date.now(), origem: origem });\nnode.status({fill: 'blue', shape: 'dot', text: origem + ': ' + prob + '% / ' + mm + ' mm'});\n// measurement previsao_chuva | tag: local | fields: prob_chuva_pct, chuva_mm (artigo, secao 3.6)\nreturn { payload: [{ prob_chuva_pct: prob, chuva_mm: mm }, { local: LOCAL }] };\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 830,
+    "y": 360,
+    "wires": [
+      [
+        "influx_chuva"
+      ]
+    ]
+  },
+  {
+    "id": "influx_chuva",
+    "type": "influxdb out",
+    "z": "tab_bueiros",
+    "influxdb": "influx_cfg",
+    "name": "InfluxDB previsao_chuva",
+    "measurement": "previsao_chuva",
+    "precision": "",
+    "retentionPolicy": "",
+    "database": "database",
+    "precisionV18FluxV20": "ms",
+    "retentionPolicyV18Flux": "",
+    "org": "bueiros",
+    "bucket": "bueiros",
+    "x": 1090,
+    "y": 360,
+    "wires": []
+  },
+  {
+    "id": "inj_forte",
+    "type": "inject",
+    "z": "tab_bueiros",
+    "name": "Simular chuva forte (90% / 5 mm)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"prob\":90,\"mm\":5}",
+    "payloadType": "json",
+    "x": 190,
+    "y": 460,
+    "wires": [
+      [
+        "fn_setsim"
+      ]
+    ]
+  },
+  {
+    "id": "inj_seca",
+    "type": "inject",
+    "z": "tab_bueiros",
+    "name": "Sem chuva (10% / 0 mm)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"prob\":10,\"mm\":0}",
+    "payloadType": "json",
+    "x": 170,
+    "y": 520,
+    "wires": [
+      [
+        "fn_setsim"
+      ]
+    ]
+  },
+  {
+    "id": "fn_setsim",
+    "type": "function",
+    "z": "tab_bueiros",
+    "name": "Definir previsao simulada",
+    "func": "\nflow.set('chuva_sim', msg.payload);\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 490,
+    "wires": [
+      [
+        "fn_prep"
+      ]
+    ]
+  },
+  {
+    "id": "note1",
+    "type": "comment",
+    "z": "tab_bueiros",
+    "name": "Sem OPENWEATHER_KEY o fluxo usa previsao simulada; com a chave, consulta a API real.",
+    "info": "",
+    "x": 330,
+    "y": 580,
+    "wires": []
+  }
+]

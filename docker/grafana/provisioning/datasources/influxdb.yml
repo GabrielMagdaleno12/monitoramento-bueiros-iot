@@ -1,0 +1,15 @@
+apiVersion: 1
+datasources:
+  - name: InfluxDB-Bueiros
+    uid: influx-bueiros
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    isDefault: true
+    jsonData:
+      version: Flux
+      organization: bueiros
+      defaultBucket: bueiros
+      tlsSkipVerify: true
+    secureJsonData:
+      token: ${INFLUX_TOKEN}

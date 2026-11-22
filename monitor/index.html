@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitor MQTT - Bueiros</title>
+<style>
+  :root { --bg:#0f1419; --card:#18202a; --txt:#e6edf3; --mut:#8b98a5; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --line:#2a3644; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f8fa; --card:#fff; --txt:#1f2328; --mut:#59636e; --line:#d0d7de; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, Segoe UI, sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  .pill { padding:2px 10px; border-radius:99px; font-size:12px; background:var(--card); border:1px solid var(--line); color:var(--mut); }
+  .pill.on { color:var(--ok); border-color:var(--ok); }
+  main { padding:16px 20px; display:grid; gap:16px; grid-template-columns: 300px 1fr; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:0 0 10px; font-weight:600; }
+  .big { font-size:34px; font-weight:700; }
+  .estado { display:inline-block; padding:3px 12px; border-radius:6px; font-weight:600; margin-top:6px; }
+  .normal { background:var(--ok); color:#fff; } .atencao { background:var(--warn); color:#111; } .critico { background:var(--bad); color:#fff; }
+  .mut { color:var(--mut); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-weight:600; font-size:12px; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size:12.5px; word-break:break-all; }
+  .t-nivel { color:#58a6ff; } .t-risco { color:var(--warn); } .t-status { color:var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Monitor MQTT - broker local (bueiros/#)</h1>
+  <span id="conn" class="pill">desconectado</span>
+  <span class="pill" id="cnt">0 mensagens</span>
+</header>
+<main>
+  <section class="card">
+    <h2>Ultima leitura</h2>
+    <div class="big" id="dist">-</div>
+    <div class="mut" id="idv">aguardando o ESP32...</div>
+    <div><span id="estado" class="estado" style="display:none"></span></div>
+    <p class="mut" style="margin:12px 0 0">Dispositivo: <b id="status">-</b></p>
+  </section>
+  <section class="card">
+    <h2>Mensagens chegando no broker</h2>
+    <table>
+      <thead><tr><th style="width:80px">Hora</th><th style="width:210px">Topico</th><th>Mensagem</th></tr></thead>
+      <tbody id="log"></tbody>
+    </table>
+  </section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.15.2/dist/mqtt.min.js"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  let n = 0;
+  const c = mqtt.connect('ws://' + (location.hostname || 'localhost') + ':9001', { clientId: 'monitor-' + Math.random().toString(16).slice(2, 8), reconnectPeriod: 2000 });
+  c.on('connect', () => { $('conn').textContent = 'conectado ao broker'; $('conn').classList.add('on'); c.subscribe('bueiros/#', { qos: 1 }); });
+  c.on('close', () => { $('conn').textContent = 'desconectado'; $('conn').classList.remove('on'); });
+  c.on('message', (topic, payload, pkt) => {
+    const msg = payload.toString();
+    if (!msg) return;
+    n++; $('cnt').textContent = n + ' mensagens';
+    const kind = topic.endsWith('/nivel') ? 'nivel' : topic.endsWith('/risco') ? 'risco' : 'status';
+    const tr = document.createElement('tr');
+    const hora = new Date().toLocaleTimeString('pt-BR');
+    tr.innerHTML = '<td>' + hora + '</td><td class="t-' + kind + '"><code></code></td><td><code></code></td>';
+    tr.querySelectorAll('code')[0].textContent = topic + (pkt.retain ? '  (retida)' : '');
+    tr.querySelectorAll('code')[1].textContent = msg;
+    $('log').prepend(tr);
+    while ($('log').children.length > 40) $('log').lastChild.remove();
+    if (kind === 'nivel') {
+      try { const d = JSON.parse(msg); $('dist').textContent = d.distancia_cm + ' cm'; $('idv').textContent = d.id + ' - ' + hora; } catch (e) {}
+    } else if (kind === 'risco') {
+      const e = $('estado'); e.style.display = 'inline-block'; e.className = 'estado ' + msg; e.textContent = 'risco: ' + msg;
+    } else {
+      $('status').textContent = msg;
+    }
+  });
+</script>
+</body>
+</html>

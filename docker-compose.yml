@@ -1,0 +1,94 @@
+# Monitoramento Inteligente de Bueiros via IoT
+# Sobe TODA a pilha com um comando:  docker compose up -d --build
+#
+#   ESP32 --MQTT--> Mosquitto --> Node-RED --> InfluxDB --> Grafana
+#
+# As senhas, tokens e a chave do OpenWeatherMap vem do arquivo .env (copie de .env.example).
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: bueiros-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # MQTT (ESP32 e Node-RED)
+      - "9001:9001"   # MQTT sobre WebSocket (pagina Monitor MQTT)
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: bueiros-influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_USER}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: bueiros
+      DOCKER_INFLUXDB_INIT_BUCKET: bueiros
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  nodered:
+    build: ./docker/node-red
+    container_name: bueiros-nodered
+    restart: unless-stopped
+    ports:
+      - "1880:1880"
+    environment:
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      OPENWEATHER_KEY: ${OPENWEATHER_KEY:-}
+      TZ: America/Sao_Paulo
+    volumes:
+      - nodered_data:/data
+    depends_on:
+      mosquitto:
+        condition: service_started
+      influxdb:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana-oss:11.3.1
+    container_name: bueiros-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 5s
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/bueiros.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      influxdb:
+        condition: service_healthy
+
+  monitor:
+    image: nginx:alpine
+    container_name: bueiros-monitor
+    restart: unless-stopped
+    ports:
+      - "8085:80"      # pagina "Monitor MQTT"
+    volumes:
+      - ./monitor:/usr/share/nginx/html:ro
+
+volumes:
+  mosquitto_data:
+  influxdb_data:
+  nodered_data:
+  grafana_data:
