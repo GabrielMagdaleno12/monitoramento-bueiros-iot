@@ -32,7 +32,7 @@ Dashboard do Grafana nos três estados de risco (**normal**, **atenção** e **c
 
 ## Vídeo de demonstração
 
-> Link do vídeo no YouTube: **COLE_AQUI_O_LINK_DO_YOUTUBE**
+> Link do vídeo no YouTube: https://youtu.be/jjVYw8rkyIc
 
 ## Topologia em nuvem (atende ao enunciado)
 
