@@ -51,7 +51,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r._field == \"nivel_pct\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> set(key: \"_field\", value: \"Nível (%)\")"
+          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r.bueiro_id =~ /^bueiro/ and r._field == \"nivel_pct\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> set(key: \"_field\", value: \"Nível (%)\")"
         }
       ],
       "fieldConfig": {
@@ -122,7 +122,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r._field == \"estado\")\n  |> last()\n  |> keep(columns: [\"_value\", \"bueiro_id\"])"
+          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r.bueiro_id =~ /^bueiro/ and r._field == \"estado\")\n  |> last()\n  |> keep(columns: [\"_value\", \"bueiro_id\"])"
         }
       ],
       "fieldConfig": {
@@ -193,7 +193,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r._field == \"nivel_pct\")\n  |> last()"
+          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r.bueiro_id =~ /^bueiro/ and r._field == \"nivel_pct\")\n  |> last()"
         }
       ],
       "fieldConfig": {
@@ -259,7 +259,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r._field == \"nivel_pct\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> set(key: \"_field\", value: \"Nível (%)\")"
+          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r.bueiro_id =~ /^bueiro/ and r._field == \"nivel_pct\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> set(key: \"_field\", value: \"Nível (%)\")"
         },
         {
           "refId": "B",
@@ -352,7 +352,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r._field == \"estado\")\n  |> set(key: \"_field\", value: \"Estado\")"
+          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r.bueiro_id =~ /^bueiro/ and r._field == \"estado\")\n  |> set(key: \"_field\", value: \"Estado\")"
         }
       ],
       "fieldConfig": {
@@ -423,7 +423,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r._field == \"estado\" and r._value == \"critico\")\n  |> group()\n  |> count()"
+          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r.bueiro_id =~ /^bueiro/ and r._field == \"estado\" and r._value == \"critico\")\n  |> group()\n  |> count()"
         }
       ],
       "fieldConfig": {
@@ -483,7 +483,7 @@
             "type": "influxdb",
             "uid": "${DS_INFLUXDB}"
           },
-          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> keep(columns: [\"_time\", \"bueiro_id\", \"distancia_cm\", \"nivel_cm\", \"nivel_pct\", \"estado\"])\n  |> group()\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 20)"
+          "query": "from(bucket: \"bueiros\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"nivel_bueiro\" and r.bueiro_id =~ /^bueiro/)\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> keep(columns: [\"_time\", \"bueiro_id\", \"distancia_cm\", \"nivel_cm\", \"nivel_pct\", \"estado\"])\n  |> group()\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 20)"
         }
       ],
       "fieldConfig": {
